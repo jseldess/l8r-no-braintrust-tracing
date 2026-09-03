@@ -1,6 +1,5 @@
 export { chatbotTools } from './tools'
 export type { ToolName, ToolParameters } from './tools'
 export { executeTool } from './tool-executor'
-export { systemPrompt, getSystemPrompt } from './system-prompt'
-export { chat, normalizeMessages } from './chat'
-export type { ChatMessage, ChatOptions, ChatResult } from './chat'
+export { systemPrompt } from './system-prompt'
+export type { ChatMessage } from './types'

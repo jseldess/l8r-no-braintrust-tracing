@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { openai, logger, updateSpan } from '@/lib/braintrust'
-import { chatbotTools, executeTool, getSystemPrompt, ToolName, ChatMessage } from '@/lib/chatbot'
+import { chatbotTools, executeTool, systemPrompt, ToolName, ChatMessage } from '@/lib/chatbot'
 import { ChatCompletionMessageParam } from 'openai/resources/chat/completions'
 
 export const runtime = 'nodejs'
@@ -52,9 +52,8 @@ export async function POST(request: NextRequest) {
         })
 
         // Build conversation messages
-        const instructions = await getSystemPrompt()
         const conversationMessages: ChatCompletionMessageParam[] = [
-          { role: 'system', content: instructions },
+          { role: 'system', content: systemPrompt },
           ...messages.map((m) => {
             if (m.role === 'tool') {
               return { role: 'tool' as const, content: m.content, tool_call_id: m.tool_call_id! }

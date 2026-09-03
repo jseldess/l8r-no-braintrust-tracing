@@ -177,14 +177,22 @@ export const paymentService = {
     }
   },
 
-  async getPaymentHistory(userId: string, limit = 20) {
+  async getPaymentHistory(
+    userId: string,
+    filters?: { status?: string; limit?: number }
+  ) {
+    // Defaults to completed payments, but any status can be requested so that
+    // failed payments are reachable (paidDate is null for those, so order by
+    // dueDate instead).
+    const status = filters?.status || 'paid'
+
     return prisma.payment.findMany({
       where: {
         userId,
-        status: 'paid',
+        status,
       },
-      orderBy: { paidDate: 'desc' },
-      take: limit,
+      orderBy: status === 'paid' ? { paidDate: 'desc' } : { dueDate: 'desc' },
+      take: filters?.limit || 20,
       include: {
         plan: {
           include: {

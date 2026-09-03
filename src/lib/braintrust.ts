@@ -7,9 +7,12 @@ export const logger = initLogger({
   apiKey: process.env.BRAINTRUST_API_KEY,
 })
 
-// Create OpenAI client wrapped with Braintrust tracing
+// Create OpenAI client wrapped with Braintrust tracing.
+// Routed through the Braintrust AI gateway, so provider credentials live in
+// Braintrust settings rather than in a local OPENAI_API_KEY.
 const openaiClient = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+  baseURL: 'https://gateway.braintrust.dev',
+  apiKey: process.env.BRAINTRUST_API_KEY,
 })
 
 export const openai = wrapOpenAI(openaiClient)

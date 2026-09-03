@@ -46,7 +46,10 @@ const executeGetPlanDetails = wrapTracedTool(async function get_plan_details(
 const executeGetPaymentHistory = wrapTracedTool(async function get_payment_history(
   params: ToolParameters['get_payment_history']
 ) {
-  return paymentService.getPaymentHistory(DEMO_USER_ID, params.limit || 20)
+  return paymentService.getPaymentHistory(DEMO_USER_ID, {
+    status: params.status,
+    limit: params.limit,
+  })
 })
 
 const executeGetPaymentDetails = wrapTracedTool(async function get_payment_details(

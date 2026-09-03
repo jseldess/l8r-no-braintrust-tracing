@@ -1,13 +1,17 @@
 # l8r Customer Service Chatbot
 
-A Next.js customer service chatbot for the fictional "l8r" buy-now-pay-later service, with comprehensive evaluation capabilities using Braintrust.
+A Next.js customer service chatbot for the fictional "l8r" buy-now-pay-later service,
+instrumented end to end with [Braintrust](https://www.braintrust.dev) tracing.
 
 ## Prerequisites
 
 - Node.js 18+
 - npm
-- OpenAI API key
+- A Postgres database ([Neon](https://console.neon.tech) in production, or a local container for development)
 - Braintrust API key
+
+No OpenAI key is needed: model calls are routed through the Braintrust gateway, which
+holds the provider credentials.
 
 ## Setup
 
@@ -19,36 +23,49 @@ npm install
 
 ### 2. Configure environment variables
 
-Copy the example environment file and add your API keys:
-
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` with your actual keys:
+Edit `.env`:
 
 ```
-DATABASE_URL="file:./dev.db"
-OPENAI_API_KEY=sk-...
-BRAINTRUST_API_KEY=bt-...
+DATABASE_URL="postgresql://..."   # pooled connection
+DIRECT_URL="postgresql://..."     # direct connection, used for migrations
+BRAINTRUST_API_KEY=sk-...
+```
+
+For local development you can run Postgres in a container instead of using Neon:
+
+```bash
+docker run -d --name l8r-pg \
+  -e POSTGRES_PASSWORD=l8r -e POSTGRES_USER=l8r -e POSTGRES_DB=l8r \
+  -p 55432:5432 postgres:16
+```
+
+and point both URLs at it:
+
+```
+DATABASE_URL="postgresql://l8r:l8r@localhost:55432/l8r?sslmode=disable"
+DIRECT_URL="postgresql://l8r:l8r@localhost:55432/l8r?sslmode=disable"
 ```
 
 ### 3. Initialize the database
 
-The app uses SQLite with Prisma. Initialize and seed the database:
-
 ```bash
-npm run db:reset
+npx prisma migrate deploy
+npx prisma generate
+npm run db:seed
 ```
 
-This will:
-- Create the SQLite database at `prisma/dev.db`
-- Apply the schema (Users, Orders, InstallmentPlans, Payments, RefundRequests)
-- Seed with sample customer data
+This applies the schema (Users, Orders, InstallmentPlans, Payments, RefundRequests) and
+seeds sample customer data. Run `prisma generate` before seeding — the seed script
+imports `@prisma/client`.
+
+Seeded demo account: **Alex Johnson**, $5,000 credit limit, $2,847.50 available, with a
+failed IKEA payment and a pending Nike refund request to exercise.
 
 ## Running the App
-
-Start the development server:
 
 ```bash
 npm run dev
@@ -58,131 +75,68 @@ Open [http://localhost:3000](http://localhost:3000) to interact with the chatbot
 
 ---
 
-## Evaluations
+## Tracing
 
-This project includes two evaluation approaches for testing the chatbot across multi-turn conversations:
+Every chat request is traced to the Braintrust project `l8r-customer-service` whenever
+`BRAINTRUST_API_KEY` is set. Four pieces do the work:
 
-![Multiturn Evals](assets/Multiturn.png)
+| Where | What it does |
+|-------|--------------|
+| `initLogger` in `src/lib/braintrust.ts` | Registers the logger for the project |
+| `wrapOpenAI` in `src/lib/braintrust.ts` | Turns every model call into an LLM span with messages, output, and token usage |
+| `wrapTracedTool` in `src/lib/chatbot/tool-executor.ts` | Wraps each tool as a `tool` span with its arguments and result |
+| `logger.startSpan` / `logger.traced` in `src/app/api/chat/route.ts` | Creates the `conversation` root span and a per-turn child span |
 
-### Understanding Multi-turn Evaluation Approaches
+### Multi-turn traces
 
-| Approach | Best For | How It Works |
-|----------|----------|--------------|
-| **Simple (Next-Turn)** | Regression testing, fast iteration | Takes conversation snapshots and predicts the next turn |
-| **Comprehensive (Simulation)** | End-to-end testing, realistic scenarios | Simulates complete conversations with AI-generated users |
+Turns of the same conversation nest under one root span. The chat route opens a
+`conversation` span, exports its ID, and streams it to the client as the first
+server-sent event:
 
----
-
-### 1. Next-Turn Evaluation (`conversation.eval.ts`)
-
-Tests the agent's ability to produce the correct next response given a conversation history.
-
-**When to use:**
-- Fast regression testing during development
-- Validating specific conversation patterns
-- Testing tool call behavior
-
-**Run the eval:**
-
-```bash
-npx braintrust eval evals/conversation.eval.ts
+```
+data: {"type":"span_id","spanId":"..."}
 ```
 
-**What it evaluates:**
-- **ToolCallCheck** - Did the agent call the expected tools?
-- **StructureCheck** - Is the response well-formatted for customer service?
-- **HelpfulnessCheck** - Does the response address the customer's needs?
+The client passes that ID back as `parentSpanId` on subsequent requests, so later turns
+attach to the existing trace instead of starting a new one.
 
-**Data source:** Uses the `L8rCustomerServiceDataset` from Braintrust, which contains conversation snapshots at various points.
+### Gateway
 
----
+`src/lib/braintrust.ts` points the OpenAI client at the Braintrust gateway:
 
-### 2. Simulated Conversation Evaluation (`sim.eval.ts`)
-
-Runs complete multi-turn conversations between a simulated user and the agent.
-
-**When to use:**
-- End-to-end conversation testing
-- Testing conversation flow and resolution
-- Evaluating how well the agent achieves user goals
-
-**Run the eval:**
-
-```bash
-npx braintrust eval evals/sim.eval.ts
+```ts
+const openaiClient = new OpenAI({
+  baseURL: 'https://gateway.braintrust.dev',
+  apiKey: process.env.BRAINTRUST_API_KEY,
+})
 ```
 
-**How it works:**
-
-1. **Profile Extraction** - Extracts the user's goal, personality, and communication style from a seed conversation
-2. **Conversation Loop** - The simulated user and agent exchange messages until:
-   - The user is satisfied (goal achieved)
-   - The user is frustrated (agent unhelpful)
-   - Max turns reached (10 turns)
-3. **Scoring** - Evaluates the entire conversation
-
-**User Personalities:**
-- `direct` - Brief, to-the-point, ends conversation promptly
-- `exploratory` - Asks follow-up questions, explores related topics
-- `frustrated` - Impatient, expresses dissatisfaction if not helped quickly
-- `friendly` - Polite, appreciative, engages in pleasantries
-- `confused` - Needs extra clarification, uncertain
-
-**What it evaluates:**
-- **ResolutionCheck** - Did the agent handle the conversation appropriately?
-- **GoalAchievement** - Did the agent help achieve the user's goal (or correctly redirect off-topic requests)?
-- **QualityCheck** - Was the conversation professional and coherent?
-- **EfficiencyCheck** - How many turns did it take to resolve?
-
-**Data source:** Uses the same `L8rCustomerServiceDataset`, treating each entry as a seed for generating a simulated user.
-
----
-
-## Customizing Evaluations
-
-Both evals support a `instructions` parameter to test different system prompts via [remote evals](https://www.braintrust.dev/docs/evaluate/remote-evals#run-remote-evaluations):
-
-```bash
-npx braintrust eval evals/sim.eval.ts --dev'
-```
-
-### Hosting the remote eval dev server (Modal)
-
-This repo includes `deploy/modal_eval_server.py`, which starts Braintrust's eval dev server for the TypeScript evals and exposes it as an HTTPS endpoint on Modal.
-
-**Prereqs:**
-- Install Modal locally (`pip install modal`) and authenticate (`modal setup`)
-- Ensure your `.env` contains `BRAINTRUST_API_KEY` `OPENAI_API_KEY`
-
-**Deploy:**
-
-```bash
-modal deploy deploy/modal_eval_server.py
-```
+Provider credentials live in Braintrust settings rather than in this repo. To call
+OpenAI directly instead, swap `baseURL`/`apiKey` for `process.env.OPENAI_API_KEY`.
 
 ## Database Commands
 
 | Command | Description |
 |---------|-------------|
-| `npm run db:push` | Push schema changes to database |
+| `npm run db:migrate` | Create and apply a migration (development) |
+| `npm run db:migrate:deploy` | Apply pending migrations (production) |
 | `npm run db:seed` | Seed database with sample data |
-| `npm run db:reset` | Reset database and reseed (destructive) |
+| `npm run db:reset` | Reset database (destructive; does not reseed — run `db:seed` after) |
+| `npm run db:studio` | Open Prisma Studio |
 
 ## Project Structure
 
 ```
 ├── src/
-│   ├── app/              # Next.js app router
-│   │   └── api/chat/     # Chat API endpoint (streaming)
+│   ├── app/
+│   │   ├── api/chat/     # Chat API endpoint (streaming, span management)
+│   │   └── dashboard/    # Dashboard, orders, payments, plans, chat UI
 │   └── lib/
-│       ├── chatbot/      # Chat logic, tools, system prompt
-│       └── braintrust.ts # Braintrust tracing setup
-├── evals/
-│   ├── conversation.eval.ts  # Next-turn evaluation
-│   └── sim.eval.ts           # Simulated conversation evaluation
-├── prisma/
-│   ├── schema.prisma     # Database schema
-│   └── seed.ts           # Database seeding script
-└── assets/
-    └── Multiturn.png     # Evaluation approach diagram
+│       ├── chatbot/      # Tool definitions, tool executor, system prompt
+│       ├── services/     # Data access (orders, payments, plans, refunds, users)
+│       ├── braintrust.ts # Braintrust logger, traced OpenAI client
+│       └── prisma.ts     # Prisma client singleton
+└── prisma/
+    ├── schema.prisma     # Database schema
+    └── seed.ts           # Database seeding script
 ```
