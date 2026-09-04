@@ -22,8 +22,6 @@ const SUGGESTED_PROMPTS = [
 export function ChatContainer() {
   const [messages, setMessages] = React.useState<Message[]>([])
   const [isLoading, setIsLoading] = React.useState(false)
-  const [sessionId] = React.useState(() => crypto.randomUUID())
-  const [parentSpanId, setParentSpanId] = React.useState<string>()
   const messagesEndRef = React.useRef<HTMLDivElement>(null)
 
   const scrollToBottom = () => {
@@ -89,8 +87,6 @@ export function ChatContainer() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: apiMessages,
-          sessionId,
-          parentSpanId,
         }),
       })
 
@@ -132,13 +128,6 @@ export function ChatContainer() {
 
             try {
               const parsed = JSON.parse(data)
-
-              if (parsed.type === 'span_id') {
-                // Store span ID for distributed tracing - only on first turn
-                // All subsequent turns become siblings under the same conversation root
-                setParentSpanId((prev) => prev ?? parsed.spanId)
-                continue
-              }
 
               if (parsed.type === 'content') {
                 assistantMessage = {

@@ -1,17 +1,17 @@
 # l8r Customer Service Chatbot
 
-A Next.js customer service chatbot for the fictional "l8r" buy-now-pay-later service,
-instrumented end to end with [Braintrust](https://www.braintrust.dev) tracing.
+A Next.js customer service chatbot for the fictional "l8r" buy-now-pay-later service.
 
 ## Prerequisites
 
 - Node.js 18+
 - npm
 - A Postgres database ([Neon](https://console.neon.tech) in production, or a local container for development)
-- Braintrust API key
+- Braintrust API key (for the AI gateway that fronts model calls)
 
 No OpenAI key is needed: model calls are routed through the Braintrust gateway, which
-holds the provider credentials.
+holds the provider credentials. The gateway is used for model access only — the app
+sends no traces or logs to Braintrust.
 
 ## Setup
 
@@ -73,46 +73,20 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) to interact with the chatbot.
 
----
+## Model access
 
-## Tracing
-
-Every chat request is traced to the Braintrust project `l8r-customer-service` whenever
-`BRAINTRUST_API_KEY` is set. Four pieces do the work:
-
-| Where | What it does |
-|-------|--------------|
-| `initLogger` in `src/lib/braintrust.ts` | Registers the logger for the project |
-| `wrapOpenAI` in `src/lib/braintrust.ts` | Turns every model call into an LLM span with messages, output, and token usage |
-| `wrapTracedTool` in `src/lib/chatbot/tool-executor.ts` | Wraps each tool as a `tool` span with its arguments and result |
-| `logger.startSpan` / `logger.traced` in `src/app/api/chat/route.ts` | Creates the `conversation` root span and a per-turn child span |
-
-### Multi-turn traces
-
-Turns of the same conversation nest under one root span. The chat route opens a
-`conversation` span, exports its ID, and streams it to the client as the first
-server-sent event:
-
-```
-data: {"type":"span_id","spanId":"..."}
-```
-
-The client passes that ID back as `parentSpanId` on subsequent requests, so later turns
-attach to the existing trace instead of starting a new one.
-
-### Gateway
-
-`src/lib/braintrust.ts` points the OpenAI client at the Braintrust gateway:
+`src/lib/openai.ts` points the OpenAI client at the Braintrust AI gateway:
 
 ```ts
-const openaiClient = new OpenAI({
+new OpenAI({
   baseURL: 'https://gateway.braintrust.dev',
   apiKey: process.env.BRAINTRUST_API_KEY,
 })
 ```
 
-Provider credentials live in Braintrust settings rather than in this repo. To call
-OpenAI directly instead, swap `baseURL`/`apiKey` for `process.env.OPENAI_API_KEY`.
+Provider credentials live in Braintrust settings rather than in this repo. This is the
+gateway only — no tracing, logging, or spans. To call OpenAI directly instead, drop
+`baseURL` and use `process.env.OPENAI_API_KEY`.
 
 ## Database Commands
 
@@ -129,12 +103,12 @@ OpenAI directly instead, swap `baseURL`/`apiKey` for `process.env.OPENAI_API_KEY
 ```
 ├── src/
 │   ├── app/
-│   │   ├── api/chat/     # Chat API endpoint (streaming, span management)
+│   │   ├── api/chat/     # Chat API endpoint (streaming)
 │   │   └── dashboard/    # Dashboard, orders, payments, plans, chat UI
 │   └── lib/
 │       ├── chatbot/      # Tool definitions, tool executor, system prompt
 │       ├── services/     # Data access (orders, payments, plans, refunds, users)
-│       ├── braintrust.ts # Braintrust logger, traced OpenAI client
+│       ├── openai.ts     # OpenAI client (via the Braintrust gateway)
 │       └── prisma.ts     # Prisma client singleton
 └── prisma/
     ├── schema.prisma     # Database schema

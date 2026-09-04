@@ -19,7 +19,6 @@
     "@prisma/client": "^5.22.0",
     "@tailwindcss/typography": "^0.5.19",
     "ai": "^6.0.41",
-    "braintrust": "^2.2.2",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "lucide-react": "^0.562.0",
