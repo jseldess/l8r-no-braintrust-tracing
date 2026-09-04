@@ -96,10 +96,15 @@ export const chatbotTools: ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'get_payment_history',
-      description: 'Get the user\'s payment history, showing completed payments.',
+      description: 'Get the user\'s payments, including the merchant each payment belongs to and, for failed payments, the reason it failed. Defaults to completed payments. Use status "failed" to find failed or declined payments - this is the tool to use when the user asks why a payment failed, or about a missed or declined payment for a specific merchant.',
       parameters: {
         type: 'object',
         properties: {
+          status: {
+            type: 'string',
+            enum: ['paid', 'failed', 'scheduled', 'pending'],
+            description: 'Filter payments by status (default: paid). Use "failed" for payments that did not go through.',
+          },
           limit: {
             type: 'number',
             description: 'Maximum number of payments to return (default: 20)',
@@ -215,7 +220,7 @@ export interface ToolParameters {
   get_order_details: { order_id: string }
   get_installment_plans: { status?: string }
   get_plan_details: { plan_id: string }
-  get_payment_history: { limit?: number }
+  get_payment_history: { status?: string; limit?: number }
   get_payment_details: { payment_id: string }
   retry_payment: { payment_id: string }
   modify_plan: { plan_id: string; action: 'pause' | 'resume' | 'reschedule'; new_date?: string }
